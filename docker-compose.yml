@@ -6,7 +6,18 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/syncthing/data:/shared
-    command: sh -c "if docker image inspect syncwatch:latest >/dev/null 2>&1; then docker save syncwatch:latest -o /shared/.syncwatch.tar && chmod a+r /shared/.syncwatch.tar && echo 'Image exported!'; else echo 'Image not found locally, skipping'; fi"
+    command: |
+      sh -c '
+        if [ -f /shared/.syncwatch.tar ]; then
+          echo "Image tar already exists, skipping"
+        elif docker image inspect syncwatch:latest >/dev/null 2>&1; then
+          docker save syncwatch:latest -o /shared/.syncwatch.tar
+          chmod a+r /shared/.syncwatch.tar
+          echo "Image exported!"
+        else
+          echo "Image not found locally, skipping"
+        fi
+      '
     deploy:
       mode: global
       restart_policy:

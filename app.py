@@ -151,7 +151,8 @@ def index():
 <html>
 <head>
     <title>SyncWatch</title>
-    <script src="/static/chart.js"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><polygon points='50,10 90,30 50,50 10,30' fill='%2316213e' stroke='%234caf50' stroke-width='2'/><circle cx='50' cy='30' r='4' fill='%234caf50'/><polygon points='50,30 90,50 50,70 10,50' fill='%2316213e' stroke='%234caf50' stroke-width='2'/><circle cx='50' cy='50' r='4' fill='%234caf50'/><polygon points='50,50 90,70 50,90 10,70' fill='%2316213e' stroke='%23f44336' stroke-width='3'/><circle cx='50' cy='70' r='4' fill='%23f44336'/></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; margin: 0; }
         h1 { text-align: center; display: flex; align-items: center; justify-content: center; gap: 15px; }
