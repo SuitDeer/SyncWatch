@@ -151,10 +151,14 @@ def index():
 <html>
 <head>
     <title>SyncWatch</title>
+    <script src="/static/chart.js"></script>
     <style>
         body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; margin: 0; }
         h1 { text-align: center; display: flex; align-items: center; justify-content: center; gap: 15px; }
         .logo { width: 50px; height: 50px; }
+        .chart-container { background: #16213e; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .chart-container h2 { margin: 0 0 15px 0; font-size: 14px; color: #888; text-align: center; }
+        #syncChart { max-height: 300px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin: 20px 0; }
         .node { background: #16213e; padding: 15px; border-radius: 8px; transition: box-shadow 0.3s; }
         .node.changed { box-shadow: 0 0 15px #4caf50; }
@@ -185,11 +189,99 @@ def index():
         <button onclick="updateInterval()">Update</button>
         <span id="configStatus" class="status"></span>
     </div>
+    <div class="chart-container">
+        <h2>Sync Delay by Sequence (ms)</h2>
+        <canvas id="syncChart"></canvas>
+    </div>
     <div id="content">Loading...</div>
     <script>
         let prevData = {};
         let latestNodes = null;
         let unsyncStart = {};  // Track when each node became unsynced
+        let syncDelayHistory = {};  // { nodeName: { seq: delayMs } }
+        let knownSequences = [];  // Ordered list of sequences
+        let lastRecordedSeq = {};  // Track last recorded sequence per node
+        let nodeColors = {};  // Persistent colors for nodes
+        const MAX_SEQUENCES = 30;
+        
+        // Color palette for nodes
+        const colorPalette = [
+            '#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5',
+            '#2196f3', '#03a9f4', '#00bcd4', '#009688', '#ff9800',
+            '#ff5722', '#795548', '#607d8b', '#8bc34a', '#cddc39'
+        ];
+        let colorIndex = 0;
+        
+        function getNodeColor(nodeName) {
+            if (!nodeColors[nodeName]) {
+                nodeColors[nodeName] = colorPalette[colorIndex % colorPalette.length];
+                colorIndex++;
+            }
+            return nodeColors[nodeName];
+        }
+        
+        // Initialize Chart.js
+        const ctx = document.getElementById('syncChart').getContext('2d');
+        const syncChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: []
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#eee', font: { family: 'monospace' } }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Sequence', color: '#888' },
+                        ticks: { color: '#888' },
+                        grid: { color: '#333' }
+                    },
+                    y: {
+                        title: { display: true, text: 'Delay (ms)', color: '#888' },
+                        ticks: { color: '#888' },
+                        grid: { color: '#333' },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+        
+        function updateChart() {
+            // Build labels from known sequences
+            syncChart.data.labels = knownSequences.slice(-MAX_SEQUENCES);
+            
+            // Build datasets for each node (excluding writer)
+            const datasets = [];
+            for (const nodeName in syncDelayHistory) {
+                const nodeData = syncDelayHistory[nodeName];
+                const data = syncChart.data.labels.map(seq => nodeData[seq] !== undefined ? nodeData[seq] : null);
+                
+                datasets.push({
+                    label: nodeName,
+                    data: data,
+                    borderColor: getNodeColor(nodeName),
+                    backgroundColor: getNodeColor(nodeName) + '33',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    spanGaps: true
+                });
+            }
+            
+            syncChart.data.datasets = datasets;
+            syncChart.update('none');
+        }
         
         // Load current config
         fetch('/api/config').then(r => r.json()).then(cfg => {
@@ -257,6 +349,52 @@ def index():
                 }
                 const nodes = d.all_nodes.slice().sort((a, b) => (a.hostname || a.ip).localeCompare(b.hostname || b.ip));
                 
+                // Find writer and current sequence
+                const writer = nodes.find(n => n.is_writer);
+                const writerSeq = writer && writer.test_file ? writer.test_file.sequence : null;
+                const now = Date.now();
+                
+                // Track sync delays for chart
+                if (writerSeq !== null) {
+                    // Add sequence to known list if new
+                    if (!knownSequences.includes(writerSeq)) {
+                        knownSequences.push(writerSeq);
+                        // Limit to MAX_SEQUENCES
+                        if (knownSequences.length > MAX_SEQUENCES) {
+                            const removed = knownSequences.shift();
+                            // Clean up old data
+                            for (const nodeName in syncDelayHistory) {
+                                delete syncDelayHistory[nodeName][removed];
+                            }
+                        }
+                    }
+                    
+                    // Record sync delays for non-writer nodes
+                    nodes.forEach(n => {
+                        if (n.is_writer || n.error) return;
+                        
+                        const key = n.hostname || n.ip;
+                        const nodeSeq = n.test_file ? n.test_file.sequence : null;
+                        
+                        // Initialize history for this node
+                        if (!syncDelayHistory[key]) {
+                            syncDelayHistory[key] = {};
+                        }
+                        
+                        // When node syncs to current sequence, record the delay
+                        if (nodeSeq === writerSeq) {
+                            // Only record if we haven't already recorded this sequence for this node
+                            if (lastRecordedSeq[key] !== writerSeq) {
+                                const delay = unsyncStart[key] ? (now - unsyncStart[key]) : 0;
+                                syncDelayHistory[key][writerSeq] = delay;
+                                lastRecordedSeq[key] = writerSeq;
+                            }
+                        }
+                    });
+                    
+                    updateChart();
+                }
+                
                 // Update prevData for change detection
                 nodes.forEach(n => {
                     const key = n.hostname || n.ip;
@@ -323,6 +461,16 @@ def api_set_config():
 def api_status():
     """Return collected node data."""
     return jsonify(last_check or {"all_nodes": []})
+
+
+@app.route("/static/chart.js")
+def serve_chartjs():
+    """Serve Chart.js from local file."""
+    try:
+        with open("chart4.5.0.min.js.js", "r") as f:
+            return Response(f.read(), mimetype="application/javascript")
+    except:
+        return Response("// Chart.js not found", mimetype="application/javascript"), 404
 
 
 @app.route("/health")

@@ -17,7 +17,7 @@ services:
     image: docker:cli
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /var/syncthing/data/hooks:/shared
+      - /var/syncthing/data:/shared
     command: |
       sh -c '
         HOSTNAME=$$(hostname)
