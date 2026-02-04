@@ -1,0 +1,104 @@
+services:
+  # === IMAGE DISTRIBUTION ===
+  # Export image to shared volume (runs on all nodes, only succeeds on build node)
+  image-exporter:
+    image: docker:cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/syncthing/data:/shared
+    command: sh -c "if docker image inspect syncwatch:latest >/dev/null 2>&1; then docker save syncwatch:latest -o /shared/.syncwatch.tar && chmod a+r /shared/.syncwatch.tar && echo 'Image exported!'; else echo 'Image not found locally, skipping'; fi"
+    deploy:
+      mode: global
+      restart_policy:
+        condition: none
+
+  # Import image from shared volume (runs on all nodes)
+  image-importer:
+    image: docker:cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/syncthing/data/hooks:/shared
+    command: |
+      sh -c '
+        HOSTNAME=$$(hostname)
+        EXPECTED_NODES=$$(docker node ls -q | wc -l)
+        echo "Cluster has $$EXPECTED_NODES nodes"
+        
+        # Wait for tar file
+        while [ ! -f /shared/.syncwatch.tar ]; do
+          echo "Waiting for image..."
+          sleep 5
+        done
+        
+        # Load image
+        docker load -i /shared/.syncwatch.tar
+        echo "Image imported!"
+        
+        # Wait for local syncwatch container
+        while ! docker ps --filter "name=syncwatch_syncwatch" --filter "status=running" | grep -q syncwatch; do
+          echo "Waiting for syncwatch container..."
+          sleep 5
+        done
+        
+        # Mark this node as ready
+        touch /shared/.syncwatch.ready.$$HOSTNAME
+        echo "Node $$HOSTNAME ready!"
+        
+        # Wait for all nodes to be ready (with extra sync time)
+        while [ $$(ls /shared/.syncwatch.ready.* 2>/dev/null | wc -l) -lt $$EXPECTED_NODES ]; do
+          echo "Waiting for all nodes... ($$(ls /shared/.syncwatch.ready.* 2>/dev/null | wc -l)/$$EXPECTED_NODES)"
+          sleep 5
+        done
+        echo "All $$EXPECTED_NODES nodes ready!"
+        
+        # Wait for sync propagation before cleanup
+        sleep 60
+        
+        # Only first node alphabetically does cleanup
+        FIRST_NODE=$$(ls /shared/.syncwatch.ready.* 2>/dev/null | head -1 | sed "s/.*ready.//")
+        if [ "$$HOSTNAME" = "$$FIRST_NODE" ]; then
+          rm -f /shared/.syncwatch.tar /shared/.syncwatch.ready.*
+          echo "Cleanup done by $$HOSTNAME!"
+        else
+          echo "Cleanup delegated to $$FIRST_NODE"
+        fi
+        
+        echo "Image distribution complete!"
+      '
+    deploy:
+      mode: global
+      restart_policy:
+        condition: none
+
+  # === SYNCWATCH SERVICES ===
+  # Runs on all nodes - checks consistency, provides internal API
+  syncwatch:
+    image: syncwatch:latest
+    deploy:
+      mode: global
+    environment:
+      - DATA_PATH=/data
+      - SERVICE_NAME=syncwatch
+      - DASHBOARD_MODE=false
+    volumes:
+      - /var/syncthing/data:/data
+    networks:
+      - syncwatch-net
+
+  # Runs on ONE node - hosts the web dashboard
+  dashboard:
+    image: syncwatch:latest
+    ports:
+      - "8081:8080"
+    environment:
+      - DATA_PATH=/data
+      - SERVICE_NAME=syncwatch
+      - DASHBOARD_MODE=true
+    volumes:
+      - /var/syncthing/data:/data
+    networks:
+      - syncwatch-net
+
+networks:
+  syncwatch-net:
+    driver: overlay
