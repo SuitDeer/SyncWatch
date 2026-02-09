@@ -18,57 +18,65 @@ Displays sync status across all nodes with a live web dashboard. Detects discrep
 2. **All nodes** read the test file and report their view via API
 3. **Dashboard** aggregates all nodes and shows sync status in real-time
 
-## Architecture
+## Requirement
 
-| Service | Mode | Description |
-|---------|------|-------------|
-| `image-exporter` | global | Exports Docker image to shared volume (only succeeds on build node) |
-| `image-importer` | global | Loads image from shared volume, coordinates node readiness |
-| `syncwatch` | global | Checker service running on all nodes |
-| `dashboard` | single | Web dashboard (port 8081) |
+- Initialized Docker Swarm (`docker swarm init`)
 
-## Usage
+## Quick Start
 
-### 1. Build on ONE node only
+Run only on **one node**
+
+**!!! Please change `/var/syncthing/data` path in the `docker-compose.yml` to match your setup !!!**
 
 ```bash
+# Clone the repository
 git clone https://github.com/SuitDeer/SyncWatch.git
 cd SyncWatch
-sudo docker build -t syncwatch:latest .
-```
 
-### 2. Deploy stack
-
-Please change `/var/syncthing/data` path to your replicated storage:
-
-```bash
+# Deploy to Swarm
 sudo docker stack deploy -c docker-compose.yml syncwatch
 ```
 
-### 3. Wait for image distribution
+Open `http://<any-node-ip>:8081` in your browser to see dashboard.
 
-- The `image-exporter` exports the image to the shared volume.
-- The `image-importer` loads it on each node and waits for all nodes to be ready.
+## File Usage
+
+| File                     | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `.consistency_test.json` | Test file written by writer node                |
+| `.syncwatch_config.json` | Shared configuration                            |
+
+## Development
+
+Run on **each node**:
 
 ```bash
-# Check export status (one node will show "Image exported!")
-sudo docker service logs syncwatch_image-exporter -f
+# Clone the repository
+git clone https://github.com/SuitDeer/SyncWatch.git
+cd SyncWatch/dev
 
-# Check import status
-sudo docker service logs syncwatch_image-importer -f
+# Build image
+sudo docker build -t syncwatch:local .
 ```
 
-### 5. View dashboard
+Run only on **one node**:
 
-Open `http://<any-node-ip>:8081` in your browser.
+```bash
+# Deploy to Swarm
+sudo docker stack deploy -c docker-compose.yml syncwatch
 
----
+sudo docker service logs syncwatch_syncwatch -f
 
-### File Usage
+sudo docker service logs syncwatch_dashboard -f
 
-| File | Purpose |
-|------|---------|
-| `.consistency_test.json` | Test file written by writer node |
-| `.syncwatch_config.json` | Shared configuration |
-| `.syncwatch.tar` | Docker image (temporary, during distribution) |
-| `.syncwatch.ready.*` | Node readiness markers (temporary) |
+## Testing ...
+
+sudo docker stack rm syncwatch
+```
+
+Run on **each node**:
+
+```bash
+# Remove dev image from local image repository
+sudo docker image rm syncwatch:local
+```

@@ -18,21 +18,22 @@ from flask import Flask, jsonify, Response
 
 app = Flask(__name__)
 
+
+def get_my_ip():
+    """Get container IP address."""
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except:
+        return "127.0.0.1"
+
+
 # Config
 DATA_PATH = os.environ.get("DATA_PATH", "/data")
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "syncwatch")
 DASHBOARD_MODE = os.environ.get("DASHBOARD_MODE", "false").lower() == "true"
 HOSTNAME = socket.gethostname()
-MY_IP = None  # Set on startup
+MY_IP = get_my_ip()
 TEST_FILE = os.path.join(DATA_PATH, ".consistency_test.json")
-
-
-def get_my_ip():
-    """Get container IP address."""
-    try:
-        return socket.gethostbyname(HOSTNAME)
-    except:
-        return "127.0.0.1"
 
 
 def discover_peers():
@@ -152,9 +153,9 @@ def index():
 <head>
     <title>SyncWatch</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><polygon points='50,10 90,30 50,50 10,30' fill='%2316213e' stroke='%234caf50' stroke-width='2'/><circle cx='50' cy='30' r='4' fill='%234caf50'/><polygon points='50,30 90,50 50,70 10,50' fill='%2316213e' stroke='%234caf50' stroke-width='2'/><circle cx='50' cy='50' r='4' fill='%234caf50'/><polygon points='50,50 90,70 50,90 10,70' fill='%2316213e' stroke='%23f44336' stroke-width='3'/><circle cx='50' cy='70' r='4' fill='%23f44336'/></svg>">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
     <style>
-        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; margin: 0; }
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; margin: 0; overflow: hidden; }
         h1 { text-align: center; display: flex; align-items: center; justify-content: center; gap: 15px; }
         .logo { width: 50px; height: 50px; }
         .chart-container { background: #16213e; padding: 20px; border-radius: 8px; margin: 20px 0; }
@@ -335,6 +336,11 @@ def index():
                 
                 html += '<div class="node' + (err ? ' err' : '') + (changed ? ' changed' : '') + syncClass + '">';
                 html += '<h3><span>' + key + '</span><span>' + (n.is_writer ? '<span class="badge">WRITER</span>' : syncBadge) + '</span></h3>';
+
+                if (latestNodes < 2 || latestNodes.length < 2) {
+                    html += '<h4>Waiting for other nodes...</h4>';
+                }
+
                 html += '<pre>' + (err ? 'Unreachable' : curr) + '</pre>';
                 html += '</div>';
             });
@@ -464,31 +470,12 @@ def api_status():
     return jsonify(last_check or {"all_nodes": []})
 
 
-@app.route("/static/chart.js")
-def serve_chartjs():
-    """Serve Chart.js from local file."""
-    try:
-        with open("chart4.5.0.min.js.js", "r") as f:
-            return Response(f.read(), mimetype="application/javascript")
-    except:
-        return Response("// Chart.js not found", mimetype="application/javascript"), 404
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok", "hostname": HOSTNAME})
-
+# Start background loop at import time so it runs under Gunicorn too
+if DASHBOARD_MODE:
+    _bg = threading.Thread(target=dashboard_loop, daemon=True)
+else:
+    _bg = threading.Thread(target=check_loop, daemon=True)
+_bg.start()
 
 if __name__ == "__main__":
-    # Set MY_IP on startup
-    MY_IP = get_my_ip()
-    
-    # Start appropriate background loop
-    if DASHBOARD_MODE:
-        t = threading.Thread(target=dashboard_loop, daemon=True)
-    else:
-        t = threading.Thread(target=check_loop, daemon=True)
-    t.start()
-    
-    # Run web server
     app.run(host="0.0.0.0", port=8080)
