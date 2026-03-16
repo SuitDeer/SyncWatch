@@ -63,7 +63,7 @@ Run only on **one node**:
 
 ```bash
 # Deploy to Swarm
-sudo docker stack deploy -c docker-compose.yml syncwatch
+sudo docker stack deploy -c docker-compose-dev.yml syncwatch
 
 sudo docker service logs syncwatch_syncwatch -f
 
