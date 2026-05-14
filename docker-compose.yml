@@ -4,6 +4,7 @@ services:
     image: suitdeer/syncwatch:latest
     deploy:
       mode: global
+      endpoint_mode: dnsrr
     environment:
       - DATA_PATH=/data
       - SERVICE_NAME=syncwatch
